@@ -88,10 +88,6 @@
 #include <linux/bpf.h>
 #include <linux/fslog.h>
 
-// [ SEC_SELINUX_PORTING_COMMON
-#include <linux/delay.h>
-// ] SEC_SELINUX_PORTING_COMMON
-
 #ifdef CONFIG_LOD_SEC
 #include <linux/linux_on_dex.h>
 #endif
@@ -114,21 +110,14 @@
 /* SECMARK reference count */
 static atomic_t selinux_secmark_refcount = ATOMIC_INIT(0);
 
-// [ SEC_SELINUX_PORTING_COMMON
-static DEFINE_MUTEX(selinux_sdcardfs_lock);
-// ] SEC_SELINUX_PORTING_COMMON
-
 #ifdef CONFIG_SECURITY_SELINUX_DEVELOP
-// [ SEC_SELINUX_PORTING_COMMON
 int selinux_enforcing;
-// ] SEC_SELINUX_PORTING_COMMON
 
 static int __init enforcing_setup(char *str)
 {
 	unsigned long enforcing;
 	if (!kstrtoul(str, 0, &enforcing))
 		selinux_enforcing = enforcing ? 1 : 0;
-
 	return 1;
 }
 __setup("enforcing=", enforcing_setup);
@@ -142,7 +131,6 @@ static int __init selinux_enabled_setup(char *str)
 	unsigned long enabled;
 	if (!kstrtoul(str, 0, &enabled))
 		selinux_enabled = enabled ? 1 : 0;
-
 	return 1;
 }
 __setup("selinux=", selinux_enabled_setup);
@@ -835,11 +823,11 @@ static int selinux_set_mnt_opts(struct super_block *sb,
 
 	if (!strcmp(sb->s_type->name, "debugfs") ||
 	    !strcmp(sb->s_type->name, "tracefs") ||
-		// [ SEC_SELINUX_PORTING_COMMON
 		!strcmp(sb->s_type->name, "configfs") ||
-		// ] SEC_SELINUX_PORTING_COMMON
 	    !strcmp(sb->s_type->name, "sysfs") ||
 	    !strcmp(sb->s_type->name, "pstore") ||
+	    !strcmp(sb->s_type->name, "binder") ||
+	    !strcmp(sb->s_type->name, "bpf") ||
 	    !strcmp(sb->s_type->name, "cgroup") ||
 	    !strcmp(sb->s_type->name, "cgroup2"))
 		sbsec->flags |= SE_SBGENFS;
@@ -2179,21 +2167,18 @@ static inline u32 open_file_to_av(struct file *file)
 
 /* Hook functions begin here. */
 
-static int selinux_binder_set_context_mgr(struct task_struct *mgr)
+static int selinux_binder_set_context_mgr(const struct cred *mgr)
 {
-	u32 mysid = current_sid();
-	u32 mgrsid = task_sid(mgr);
-
-	return avc_has_perm(mysid, mgrsid, SECCLASS_BINDER,
+	return avc_has_perm(current_sid(), cred_sid(mgr), SECCLASS_BINDER,
 			    BINDER__SET_CONTEXT_MGR, NULL);
 }
 
-static int selinux_binder_transaction(struct task_struct *from,
-				      struct task_struct *to)
+static int selinux_binder_transaction(const struct cred *from,
+				      const struct cred *to)
 {
 	u32 mysid = current_sid();
-	u32 fromsid = task_sid(from);
-	u32 tosid = task_sid(to);
+	u32 fromsid = cred_sid(from);
+	u32 tosid = cred_sid(to);
 	int rc;
 
 	if (mysid != fromsid) {
@@ -2207,21 +2192,19 @@ static int selinux_binder_transaction(struct task_struct *from,
 			    NULL);
 }
 
-static int selinux_binder_transfer_binder(struct task_struct *from,
-					  struct task_struct *to)
+static int selinux_binder_transfer_binder(const struct cred *from,
+					  const struct cred *to)
 {
-	u32 fromsid = task_sid(from);
-	u32 tosid = task_sid(to);
-
-	return avc_has_perm(fromsid, tosid, SECCLASS_BINDER, BINDER__TRANSFER,
+	return avc_has_perm(cred_sid(from), cred_sid(to),
+			    SECCLASS_BINDER, BINDER__TRANSFER,
 			    NULL);
 }
 
-static int selinux_binder_transfer_file(struct task_struct *from,
-					struct task_struct *to,
+static int selinux_binder_transfer_file(const struct cred *from,
+					const struct cred *to,
 					struct file *file)
 {
-	u32 sid = task_sid(to);
+	u32 sid = cred_sid(to);
 	struct file_security_struct *fsec = file->f_security;
 	struct dentry *dentry = file->f_path.dentry;
 	struct inode_security_struct *isec;
@@ -3159,24 +3142,6 @@ static int selinux_inode_permission(struct inode *inode, int mask)
 	isec = inode_security_rcu(inode, flags & MAY_NOT_BLOCK);
 	if (IS_ERR(isec))
 		return PTR_ERR(isec);
-
-// [ SEC_SELINUX_PORTING_COMMON
-	/* skip sid == 1(kernel), it means first boot time */
-	if (isec->initialized != 1 && sid != 1) {
-		int count = 5;
-
-		while (count-- > 0) {
-			pr_err("SELinux : inode->i_security is not initialized. waiting...(%d/5)\n", 5-count);
-			udelay(500);
-			if (isec->initialized == 1) {
-				pr_err("SELinux : inode->i_security is INITIALIZED.\n");
-				break;
-			}
-		}
-		if (isec->initialized != 1)
-			pr_err("SELinux : inode->i_security is not initialized. not fixed.\n");
-	}
-// ] SEC_SELINUX_PORTING_COMMON
 
 	rc = avc_has_perm_noaudit(sid, isec->sid, isec->sclass, perms, 0, &avd);
 	audited = avc_audit_required(perms, &avd, rc,
