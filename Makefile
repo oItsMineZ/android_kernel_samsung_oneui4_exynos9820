@@ -374,7 +374,7 @@ AS		= $(CROSS_COMPILE)as
 LD		= $(CROSS_COMPILE)ld
 LDGOLD		= $(CROSS_COMPILE)ld.gold
 #CC		= $(CROSS_COMPILE)gcc
-CC              = $(srctree)/toolchains/clang-r416183b1/bin/clang
+CC              = $(srctree)/toolchain/clang-r416183b1/bin/clang
 CPP		= $(CC) -E
 AR		= $(CROSS_COMPILE)ar
 NM		= $(CROSS_COMPILE)nm
@@ -425,6 +425,13 @@ KBUILD_AFLAGS   := -D__ASSEMBLY__ -march=armv8-a+lse
 KBUILD_CFLAGS   := -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs \
 		   -fno-strict-aliasing -fno-common -fshort-wchar \
 		   -Wno-format-security \
+                   -Wno-misleading-indentation \
+                   -Wno-pointer-to-int-cast \
+                   -Wno-void-pointer-to-enum-cast \
+                   -Wno-sizeof-array-div \
+                   -Wno-tautological-overlap-compare \
+                   -Wno-fortify-source \
+                   -Wno-sizeof-pointer-div \
 		   -Xassembler -march=armv8-a+lse \
 		   -std=gnu89
 KBUILD_CPPFLAGS := -D__KERNEL__
@@ -487,7 +494,7 @@ endif
 ifeq ($(cc-name),clang)
 ifneq ($(CROSS_COMPILE),)
 #CLANG_TRIPLE	?= $(CROSS_COMPILE)
-CLANG_TRIPLE    ?=$(srctree)/toolchains/clang-r416183b1/bin/aarch64-linux-gnu-
+CLANG_TRIPLE    ?=$(srctree)/toolchain/clang-r416183b1/bin/aarch64-linux-gnu-
 CLANG_FLAGS	:= --target=$(notdir $(CLANG_TRIPLE:%-=%))
 GCC_TOOLCHAIN_DIR := $(dir $(shell which $(CROSS_COMPILE)elfedit))
 CLANG_FLAGS	+= --prefix=$(GCC_TOOLCHAIN_DIR)
