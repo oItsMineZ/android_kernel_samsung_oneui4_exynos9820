@@ -134,6 +134,7 @@ FUNC_BUILD_KERNEL()
 
     ## Build auxiliary boot.img files
     # Copy kernel to build
+    mkdir -p $RDIR/build/out/$MODEL
     cp out/arch/arm64/boot/Image build/out/$MODEL
 
     echo " Finished kernel build"
