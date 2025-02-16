@@ -39,6 +39,7 @@
 *.symtypes
 *.tar
 *.xz
+*.log
 Module.symvers
 modules.builtin
 
@@ -131,5 +132,6 @@ build/export/
 build/out/
 out/
 
-# TZDEV
-drivers/misc/tzdev/
+# Python cache
+scripts/crypto/__pycache__/
+scripts/fmp/__pycache__/
