@@ -135,3 +135,6 @@ out/
 # Python cache
 scripts/crypto/__pycache__/
 scripts/fmp/__pycache__/
+
+# tsp_sec
+!firmware/tsp_sec/*
