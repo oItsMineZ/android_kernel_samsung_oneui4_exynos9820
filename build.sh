@@ -1,22 +1,59 @@
 #!/bin/bash
 
-export MODEL=$1
+abort()
+{
+    cd -
+    echo "-----------------------------------------------"
+    echo "Kernel compilation failed! Exiting..."
+    echo "-----------------------------------------------"
+    exit -1
+}
+
+unset_flags()
+{
+    cat << EOF
+Usage: $(basename "$0") [options]
+Options:
+    -m, --model [value]    Specify the model code of the phone
+    -k, --ksu [y/N]        Include KernelSU Next with SuSFS
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --model|-m)
+            MODEL="$2"
+            shift 2
+            ;;
+        --ksu|-k)
+            KSU_OPTION="$2"
+            shift 2
+            ;;
+        *)\
+            unset_flags
+            exit 1
+            ;;
+    esac
+done
+
 export BUILD_CROSS_COMPILE=$(pwd)/toolchain/aarch64-linux-android-4.9/bin/aarch64-linux-androidkernel-
 export BUILD_JOB_NUMBER=`grep -c ^processor /proc/cpuinfo`
 RDIR=$(pwd)
 
+# Define specific variables
+KERNEL_DEFCONFIG=oitsminez-"$MODEL"_defconfig
 case $MODEL in
-beyond2lte)
+beyond0lte)
     SOC=9820
-    BOARD=SRPRI17C014KU
+    BOARD=SRPRI28A014KU
 ;;
 beyond1lte)
     SOC=9820
     BOARD=SRPRI28B014KU
 ;;
-beyond0lte)
+beyond2lte)
     SOC=9820
-    BOARD=SRPRI28A014KU
+    BOARD=SRPRI17C014KU
 ;;
 beyondx)
     SOC=9820
@@ -39,88 +76,114 @@ d2x)
     BOARD=SRPSC14C007KU
 ;;
 *)
-    echo "Unknown device: $MODEL setting to d2s"
-    MODEL=d2s
-    SOC=9825
-    BOARD=SRPSC14B007KU
+    unset_flags
+    exit
 esac
-KERNEL_DEFCONFIG=oitsminez-"$MODEL"_defconfig
+
+if [ -z $KSU_OPTION ]; then
+    read -p "Include Include KernelSU Next with SuSFS (y/N): " KSU_OPTION
+fi
+
+if [[ "$KSU_OPTION" == "y" ]]; then
+    KSU_NEXT=ksu_next.config
+fi
 
 FUNC_BUILD_KERNEL()
 {
+    echo "Defconfig: "$KERNEL_DEFCONFIG""
+    if [ -z "$KSU_NEXT" ]; then
+        echo "KSU_NEXT: N"
+    else
+        echo "KSU_NEXT: $KSU_NEXT"
+    fi
+
     echo " Starting a kernel build using "$KERNEL_DEFCONFIG ""
 
     if [[ "$SOC" == "9825" ]]; then
-        NOTE10=exynos9825.config
+        N10=exynos9825.config
     fi
 
     make -j$BUILD_JOB_NUMBER ARCH=arm64 \
-        CROSS_COMPILE=$BUILD_CROSS_COMPILE \
-        $KERNEL_DEFCONFIG oitsminez.config ksu_next.config $NOTE10 || exit -1
+        CROSS_COMPILE=$BUILD_CROSS_COMPILE O=out \
+        $KERNEL_DEFCONFIG oitsminez.config $KSU_NEXT $N10 || abort
 
     make -j$BUILD_JOB_NUMBER ARCH=arm64 \
-        CROSS_COMPILE=$BUILD_CROSS_COMPILE || exit -1
-
-    $RDIR/toolchain/mkdtimg cfg_create build/dtb_$SOC.img \
-        $RDIR/toolchain/configs/exynos$SOC.cfg \
-        -d $RDIR/arch/arm64/boot/dts/exynos
+        CROSS_COMPILE=$BUILD_CROSS_COMPILE O=out || abort
 
     echo " Finished kernel build"
 }
 
 FUNC_BUILD_DTBO()
 {
-    $RDIR/toolchain/mkdtimg cfg_create build/dtbo_$MODEL.img \
-        $RDIR/toolchain/configs/$MODEL.cfg \
-        -d $RDIR/arch/arm64/boot/dts/samsung
+    $RDIR/toolchain/mkdtimg cfg_create $RDIR/build/out/$MODEL/dtb_$SOC.img \
+        $RDIR/build/dtconfigs/exynos$SOC.cfg \
+        -d $RDIR/out/arch/arm64/boot/dts/exynos
+
+    $RDIR/toolchain/mkdtimg cfg_create $RDIR/build/out/$MODEL/dtbo_$MODEL.img \
+        $RDIR/build/dtconfigs/$MODEL.cfg \
+        -d $RDIR/out/arch/arm64/boot/dts/samsung
 }
 
 FUNC_BUILD_RAMDISK()
 {
-    rm -f $RDIR/ramdisk/split_img/boot.img-kernel
-    cp $RDIR/arch/arm64/boot/Image $RDIR/ramdisk/split_img/boot.img-kernel
-    echo $BOARD > ramdisk/split_img/boot.img-board
+    rm -f $RDIR/build/AIK/split_img/boot.img-kernel
+    cp $RDIR/out/arch/arm64/boot/Image $RDIR/build/AIK/split_img/boot.img-kernel
+    echo $BOARD > build/AIK/split_img/boot.img-board
+
     # This is kinda ugly hack, we could as well touch .placeholder to all of those
-    mkdir -p $RDIR/ramdisk/ramdisk/debug_ramdisk
-    mkdir -p $RDIR/ramdisk/ramdisk/dev
-    mkdir -p $RDIR/ramdisk/ramdisk/mnt
-    mkdir -p $RDIR/ramdisk/ramdisk/proc
-    mkdir -p $RDIR/ramdisk/ramdisk/sys
+    mkdir -p $RDIR/build/AIK/ramdisk/debug_ramdisk
+    mkdir -p $RDIR/build/AIK/ramdisk/dev
+    mkdir -p $RDIR/build/AIK/ramdisk/mnt
+    mkdir -p $RDIR/build/AIK/ramdisk/proc
+    mkdir -p $RDIR/build/AIK/ramdisk/sys
 
-    rm -rf $RDIR/ramdisk/ramdisk/fstab.exynos9820
-    rm -rf $RDIR/ramdisk/ramdisk/fstab.exynos9825
+    rm -rf $RDIR/build/AIK/ramdisk/fstab.exynos9820
+    rm -rf $RDIR/build/AIK/ramdisk/fstab.exynos9825
 
-    cp $RDIR/ramdisk/fstab.exynos$SOC $RDIR/ramdisk/ramdisk/
+    cp $RDIR/build/AIK/fstab.exynos$SOC $RDIR/build/AIK/ramdisk/
 
-    cd $RDIR/ramdisk/
+    cd $RDIR/build/AIK/
     ./repackimg.sh --nosudo
 }
 
 FUNC_BUILD_ZIP()
 {
-    cd $RDIR/build
-    rm -rf $MODEL-boot-ramdisk.img
-    mv $RDIR/ramdisk/image-new.img $RDIR/build/$MODEL-boot-ramdisk.img
+    rm -rf $RDIR/build/out/$MODEL/zip
+    mkdir -p $RDIR/build/export
+    mkdir -p $RDIR/build/out/$MODEL/zip
+    mkdir -p $RDIR/build/out/$MODEL/zip/META-INF/com/google/android
+    mv $RDIR/build/AIK/image-new.img $RDIR/build/out/$MODEL/boot-patched.img
 
     # Make recovery flashable package
-    rm -rf $RDIR/build/zip
-    mkdir -p $RDIR/build/zip
-    cp $RDIR/build/$MODEL-boot-ramdisk.img $RDIR/build/zip/boot.img
-    cp $RDIR/build/dtb_$SOC.img $RDIR/build/zip/dtb.img
-    cp $RDIR/build/dtbo_$MODEL.img $RDIR/build/zip/dtbo.img
-    mkdir -p $RDIR/build/zip/META-INF/com/google/android/
-    cp $RDIR/toolchain/updater-script $RDIR/build/zip/META-INF/com/google/android/
-    cp $RDIR/toolchain/update-binary $RDIR/build/zip/META-INF/com/google/android/
-    cd $RDIR/build/zip
-    zip -r ../kernel_$MODEL.zip .
-    rm -rf $RDIR/build/zip
-    cd $RDIR/build
+    cp $RDIR/build/out/$MODEL/boot-patched.img $RDIR/build/out/$MODEL/zip/boot.img
+    cp $RDIR/build/out/$MODEL/dtb_exynos$SOC.img $RDIR/build/out/$MODEL/zip/dtb.img
+    cp $RDIR/build/out/$MODEL/dtbo_$MODEL.img $RDIR/build/out/$MODEL/zip/dtbo.img
+    cp $RDIR/build/updater-script $RDIR/build/out/$MODEL/zip/META-INF/com/google/android/
+    cp $RDIR/build/update-binary $RDIR/build/out/$MODEL/zip/META-INF/com/google/android/
+    cd $RDIR/build/out/$MODEL/zip
+
+    if [ "$SOC" == "9825" ]; then
+        version=$(grep -o 'CONFIG_LOCALVERSION="[^"]*"' arch/arm64/configs/exynos9825.config | cut -d '"' -f 2)
+    else
+        version=$(grep -o 'CONFIG_LOCALVERSION="[^"]*"' arch/arm64/configs/oitsminez.config | cut -d '"' -f 2)
+    fi
+
+    version=${version:1}
+    DATE=`date +"%d-%m-%Y_%H-%M-%S"`    
+    NAME="$version"-"$MODEL"-KSU-NEXT-v2+SuSFS-"$DATE".zip
+
+    zip -r ../"$NAME" .
+    rm -rf $RDIR/build/out/$MODEL/zip
+    mv $RDIR/build/out/$MODEL/"$NAME" $RDIR/build/export/"$NAME"
+    cd $RDIR/build/export
 }
 
 # MAIN FUNCTION
 rm -rf ./build.log
 (
 	START_TIME=`date +%s`
+
+	echo "Preparing the build environment..."
 
 	FUNC_BUILD_KERNEL
 	FUNC_BUILD_DTBO
